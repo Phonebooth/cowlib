@@ -1,4 +1,4 @@
-%% Copyright (c) 2014, Loïc Hoguin <essen@ninenines.eu>
+%% Copyright (c) 2014-2015, Loïc Hoguin <essen@ninenines.eu>
 %%
 %% Permission to use, copy, modify, and/or distribute this software for any
 %% purpose with or without fee is hereby granted, provided that the above
@@ -14,6 +14,7 @@
 
 -module(cow_http_hd).
 
+%% Parsing.
 -export([parse_accept/1]).
 -export([parse_accept_charset/1]).
 % @todo -export([parse_accept_datetime/1]). RFC7089
@@ -27,8 +28,8 @@
 % @todo -export([parse_access_control_allow_origin/1]). CORS
 % @todo -export([parse_access_control_expose_headers/1]). CORS
 % @todo -export([parse_access_control_max_age/1]). CORS
-% @todo -export([parse_access_control_request_headers/1]). CORS
-% @todo -export([parse_access_control_request_method/1]). CORS
+-export([parse_access_control_request_headers/1]).
+-export([parse_access_control_request_method/1]).
 -export([parse_age/1]).
 -export([parse_allow/1]).
 % @todo -export([parse_alternates/1]). RFC2295
@@ -56,7 +57,7 @@
 % @todo -export([parse_forwarded/1]). RFC7239
 % @todo -export([parse_from/1]). RFC7231
 -export([parse_host/1]).
-% @todo -export([parse_http2_settings/1]). HTTP/2 (upcoming)
+-export([parse_http2_settings/1]).
 -export([parse_if_match/1]).
 -export([parse_if_modified_since/1]).
 -export([parse_if_none_match/1]).
@@ -69,7 +70,7 @@
 -export([parse_max_forwards/1]).
 % @todo -export([parse_memento_datetime/1]). RFC7089
 % @todo -export([parse_negotiate/1]). RFC2295
-% @todo -export([parse_origin/1]). CORS, RFC6454
+-export([parse_origin/1]).
 -export([parse_pragma/1]).
 % @todo -export([parse_prefer/1]). RFC7240
 -export([parse_proxy_authenticate/1]).
@@ -109,6 +110,14 @@
 % @todo -export([parse_x_dns_prefetch_control/1]). Various (value: "on"|"off")
 -export([parse_x_forwarded_for/1]).
 % @todo -export([parse_x_frame_options/1]). RFC7034
+
+%% Building.
+-export([access_control_allow_credentials/0]).
+-export([access_control_allow_headers/1]).
+-export([access_control_allow_methods/1]).
+-export([access_control_allow_origin/1]).
+-export([access_control_expose_headers/1]).
+-export([access_control_max_age/1]).
 
 -type etag() :: {weak | strong, binary()}.
 -export_type([etag/0]).
@@ -202,6 +211,8 @@ qvalue_to_iodata(Q) when Q < 100 -> [<<"0.0">>, integer_to_binary(Q)];
 qvalue_to_iodata(Q) when Q < 1000 -> [<<"0.">>, integer_to_binary(Q)];
 qvalue_to_iodata(1000) -> <<"1">>.
 -endif.
+
+%% Parsing.
 
 %% @doc Parse the Accept header.
 
@@ -386,9 +397,7 @@ parse_accept_error_test_() ->
 		<<"audio/basic;t=\"zero \\", 0, " woo\"">>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_accept(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_accept() ->
 	horse:repeat(20000,
 		parse_accept(<<"text/*;q=0.3, text/html;q=0.7, text/html;level=1, "
@@ -480,9 +489,7 @@ parse_accept_charset_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_accept_charset(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_accept_charset() ->
 	horse:repeat(20000,
 		parse_accept_charset(<<"iso-8859-5, unicode-1-1;q=0.8">>)
@@ -538,9 +545,7 @@ parse_accept_encoding_test_() ->
 		]}
 	],
 	[{V, fun() -> R = parse_accept_encoding(V) end} || {V, R} <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_accept_encoding() ->
 	horse:repeat(20000,
 		parse_accept_encoding(<<"gzip;q=1.0, identity; q=0.5, *;q=0">>)
@@ -657,9 +662,7 @@ parse_accept_language_error_test_() ->
 		<<"419-en-us">>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_accept_language(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_accept_language() ->
 	horse:repeat(20000,
 		parse_accept_language(<<"da, en-gb;q=0.8, en;q=0.7">>)
@@ -688,9 +691,7 @@ parse_accept_ranges_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_accept_ranges(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_accept_ranges_none() ->
 	horse:repeat(200000,
 		parse_accept_ranges(<<"none">>)
@@ -704,6 +705,80 @@ horse_parse_accept_ranges_bytes() ->
 horse_parse_accept_ranges_other() ->
 	horse:repeat(200000,
 		parse_accept_ranges(<<"bytes, pages, kilos">>)
+	).
+-endif.
+
+%% @doc Parse the Access-Control-Request-Headers header.
+
+-spec parse_access_control_request_headers(binary()) -> [binary()].
+parse_access_control_request_headers(Headers) ->
+	token_ci_list(Headers, []).
+
+-ifdef(TEST).
+headers() ->
+	?LET(L,
+		list({ows(), ows(), token()}),
+		case L of
+			[] -> {[], <<>>};
+			_ ->
+				<< _, Headers/binary >> = iolist_to_binary([[OWS1, $,, OWS2, M] || {OWS1, OWS2, M} <- L]),
+				{[?LOWER(M) || {_, _, M} <- L], Headers}
+		end).
+
+prop_parse_access_control_request_headers() ->
+	?FORALL({L, Headers},
+		headers(),
+		L =:= parse_access_control_request_headers(Headers)).
+
+parse_access_control_request_headers_test_() ->
+	Tests = [
+		{<<>>, []},
+		{<<"Content-Type">>, [<<"content-type">>]},
+		{<<"accept, authorization, content-type">>, [<<"accept">>, <<"authorization">>, <<"content-type">>]},
+		{<<"accept,, , authorization,content-type">>, [<<"accept">>, <<"authorization">>, <<"content-type">>]}
+	],
+	[{V, fun() -> R = parse_access_control_request_headers(V) end} || {V, R} <- Tests].
+
+horse_parse_access_control_request_headers() ->
+	horse:repeat(200000,
+		parse_access_control_request_headers(<<"accept, authorization, content-type">>)
+	).
+-endif.
+
+%% @doc Parse the Access-Control-Request-Method header.
+
+-spec parse_access_control_request_method(binary()) -> binary().
+parse_access_control_request_method(Method) ->
+	true = <<>> =/= Method,
+	ok = validate_token(Method),
+	Method.
+
+validate_token(<< C, R/bits >>) when ?IS_TOKEN(C) -> validate_token(R);
+validate_token(<<>>) -> ok. 
+
+-ifdef(TEST).
+parse_access_control_request_method_test_() ->
+	Tests = [
+		<<"GET">>,
+		<<"HEAD">>,
+		<<"POST">>,
+		<<"PUT">>,
+		<<"DELETE">>,
+		<<"TRACE">>,
+		<<"CONNECT">>,
+		<<"whatever">>
+	],
+	[{V, fun() -> R = parse_access_control_request_method(V) end} || {V, R} <- Tests].
+
+parse_access_control_request_method_error_test_() ->
+	Tests = [
+		<<>>
+	],
+	[{V, fun() -> {'EXIT', _} = (catch parse_access_control_request_method(V)) end} || V <- Tests].
+
+horse_parse_access_control_request_method() ->
+	horse:repeat(200000,
+		parse_access_control_request_method(<<"POST">>)
 	).
 -endif.
 
@@ -764,9 +839,7 @@ parse_allow_test_() ->
 		{<<"GET, HEAD, PUT">>, [<<"GET">>, <<"HEAD">>, <<"PUT">>]}
 	],
 	[{V, fun() -> R = parse_allow(V) end} || {V, R} <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_allow() ->
 	horse:repeat(200000,
 		parse_allow(<<"GET, HEAD, PUT">>)
@@ -863,9 +936,7 @@ parse_authorization_test_() ->
 				{<<"opaque">>, <<"5ccc069c403ebaf9f0171e9517f40e41">>}]}}
 	],
 	[{V, fun() -> R = parse_authorization(V) end} || {V, R} <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_authorization_basic() ->
 	horse:repeat(20000,
 		parse_authorization(<<"Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==">>)
@@ -1014,9 +1085,7 @@ parse_cache_control_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_cache_control(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_cache_control_no_cache() ->
 	horse:repeat(200000,
 		parse_cache_control(<<"no-cache">>)
@@ -1078,9 +1147,7 @@ parse_connection_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_connection(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_connection_close() ->
 	horse:repeat(200000,
 		parse_connection(<<"close">>)
@@ -1115,9 +1182,7 @@ parse_content_encoding_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_content_encoding(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_content_encoding() ->
 	horse:repeat(200000,
 		parse_content_encoding(<<"gzip">>)
@@ -1403,9 +1468,7 @@ parse_content_language_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_content_language(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_content_language() ->
 	horse:repeat(100000,
 		parse_content_language(<<"fr, en-US, es-419, az-Arab, x-pig-latin, man-Nkoo-GN">>)
@@ -1413,8 +1476,6 @@ horse_parse_content_language() ->
 -endif.
 
 %% @doc Parse the Content-Length header.
-%%
-%% The value has at least one digit, and may be followed by whitespace.
 
 -spec parse_content_length(binary()) -> non_neg_integer().
 parse_content_length(ContentLength) ->
@@ -1449,9 +1510,7 @@ parse_content_length_error_test_() ->
 		<<"4.17">>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_content_length(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_content_length_zero() ->
 	horse:repeat(100000,
 		parse_content_length(<<"0">>)
@@ -1551,9 +1610,7 @@ parse_content_range_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_content_range(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_content_range_bytes() ->
 	horse:repeat(200000,
 		parse_content_range(<<"bytes 21010-47021/47022">>)
@@ -1666,9 +1723,7 @@ parse_content_type_test_() ->
 			]}}
 	],
 	[{V, fun() -> R = parse_content_type(V) end} || {V, R} <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_content_type() ->
 	horse:repeat(200000,
 		parse_content_type(<<"text/html;charset=utf-8">>)
@@ -1739,9 +1794,7 @@ parse_etag_error_test_() ->
 		<<"W/">>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_etag(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_etag() ->
 	horse:repeat(200000,
 		parse_etag(<<"W/\"xyzzy\"">>)
@@ -1789,9 +1842,7 @@ parse_expect_error_test_() ->
 		<<"Cookies">>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_expect(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_expect() ->
 	horse:repeat(200000,
 		parse_expect(<<"100-continue">>)
@@ -1821,9 +1872,7 @@ parse_expires_test_() ->
 		{<<"Thu, 01 Dec 1994 16:00:00 GMT">>, {{1994, 12, 1}, {16, 0, 0}}}
 	],
 	[{V, fun() -> R = parse_expires(V) end} || {V, R} <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_expires_0() ->
 	horse:repeat(200000,
 		parse_expires(<<"0">>)
@@ -1897,9 +1946,7 @@ parse_host_test_() ->
 		{<<"[::ffff:192.0.2.1]">>, {<<"[::ffff:192.0.2.1]">>, undefined}}
 	],
 	[{V, fun() -> R = parse_host(V) end} || {V, R} <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_host_blue_example_org() ->
 	horse:repeat(200000,
 		parse_host(<<"blue.example.org:8080">>)
@@ -1920,6 +1967,12 @@ horse_parse_host_ipv6_v4() ->
 		parse_host(<<"[::ffff:192.0.2.1]:8080">>)
 	).
 -endif.
+
+%% @doc Parse the HTTP2-Settings header.
+
+-spec parse_http2_settings(binary()) -> map().
+parse_http2_settings(HTTP2Settings) ->
+	cow_http2:parse_settings_payload(base64:decode(HTTP2Settings)).
 
 %% @doc Parse the If-Match header.
 
@@ -1966,9 +2019,7 @@ parse_if_match_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_if_match(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_if_match() ->
 	horse:repeat(200000,
 		parse_if_match(<<"\"xyzzy\", \"r2d2xxxx\", \"c3piozzzz\"">>)
@@ -2015,9 +2066,7 @@ parse_if_none_match_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_if_none_match(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_if_none_match() ->
 	horse:repeat(200000,
 		parse_if_none_match(<<"W/\"xyzzy\", W/\"r2d2xxxx\", W/\"c3piozzzz\"">>)
@@ -2048,9 +2097,7 @@ parse_if_range_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_if_range(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_if_range_etag() ->
 	horse:repeat(200000,
 		parse_if_range(<<"\"xyzzy\"">>)
@@ -2123,6 +2170,148 @@ parse_max_forwards_error_test_() ->
 		<<"4.17">>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_max_forwards(V)) end} || V <- Tests].
+-endif.
+
+%% @doc Parse the Origin header.
+
+%% According to the RFC6454 we should generate
+%% a fresh globally unique identifier and return that value if:
+%% - URI does not use a hierarchical element as a naming authority
+%%   or the URI is not an absolute URI
+%% - the implementation doesn't support the protocol given by uri-scheme
+%% Thus, erlang reference represents a GUID here.
+%%
+%% We only seek to have legal characters and separate the
+%% host and port values. The number of segments in the host
+%% or the size of each segment is not checked.
+%%
+%% There is no way to distinguish IPv4 addresses from regular
+%% names until the last segment is reached therefore we do not
+%% differentiate them.
+%%
+%% @todo The following valid hosts are currently rejected: IPv6
+%% addresses with a zone identifier; IPvFuture addresses;
+%% and percent-encoded addresses.
+
+-spec parse_origin(binary()) -> [{binary(), binary(), 0..65535} | reference()].
+parse_origin(Origins) ->
+	nonempty(origin_scheme(Origins, [])).
+
+origin_scheme(<<>>, Acc) -> Acc;
+origin_scheme(<< "http://", R/bits >>, Acc) -> origin_host(R, Acc, <<"http">>);
+origin_scheme(<< "https://", R/bits >>, Acc) -> origin_host(R, Acc, <<"https">>);
+origin_scheme(<< C, R/bits >>, Acc) when ?IS_TOKEN(C)  -> origin_scheme(next_origin(R), [make_ref()|Acc]).
+
+origin_host(<< $[, R/bits >>, Acc, Scheme) -> origin_ipv6_address(R, Acc, Scheme, << $[ >>);
+origin_host(Host, Acc, Scheme) -> origin_reg_name(Host, Acc, Scheme, <<>>).
+
+origin_ipv6_address(<< $] >>, Acc, Scheme, IP) ->
+	lists:reverse([{Scheme, << IP/binary, $] >>, default_port(Scheme)}|Acc]);
+origin_ipv6_address(<< $], $\s, R/bits >>, Acc, Scheme, IP) ->
+	origin_scheme(R, [{Scheme, << IP/binary, $] >>, default_port(Scheme)}|Acc]);
+origin_ipv6_address(<< $], $:, Port/bits >>, Acc, Scheme, IP) ->
+	origin_port(Port, Acc, Scheme, << IP/binary, $] >>, <<>>);
+origin_ipv6_address(<< C, R/bits >>, Acc, Scheme, IP) when ?IS_HEX(C) or (C =:= $:) or (C =:= $.) ->
+	?LOWER(origin_ipv6_address, R, Acc, Scheme, IP).
+
+origin_reg_name(<<>>, Acc, Scheme, Name) ->
+	lists:reverse([{Scheme, Name, default_port(Scheme)}|Acc]);
+origin_reg_name(<< $\s, R/bits >>, Acc, Scheme, Name) ->
+	origin_scheme(R, [{Scheme, Name, default_port(Scheme)}|Acc]);
+origin_reg_name(<< $:, Port/bits >>, Acc, Scheme, Name) ->
+	origin_port(Port, Acc, Scheme, Name, <<>>);
+origin_reg_name(<< C, R/bits >>, Acc, Scheme, Name) when ?IS_URI_UNRESERVED(C) or ?IS_URI_SUB_DELIMS(C) ->
+	?LOWER(origin_reg_name, R, Acc, Scheme, Name).
+
+origin_port(<<>>, Acc, Scheme, Host, Port) ->
+	lists:reverse([{Scheme, Host, binary_to_integer(Port)}|Acc]);
+origin_port(<< $\s, R/bits >>, Acc, Scheme, Host, Port) ->
+	origin_scheme(R, [{Scheme, Host, binary_to_integer(Port)}|Acc]);
+origin_port(<< C, R/bits >>, Acc, Scheme, Host, Port) when ?IS_DIGIT(C) ->
+	origin_port(R, Acc, Scheme, Host, << Port/binary, C >>).
+
+next_origin(<<>>) -> <<>>;
+next_origin(<< $\s, C, R/bits >>) when ?IS_TOKEN(C) -> << C, R/bits >>;
+next_origin(<< C, R/bits >>) when ?IS_TOKEN(C) or (C =:= $:) or (C =:= $/) -> next_origin(R).
+
+default_port(<< "http" >>) -> 80;
+default_port(<< "https" >>) -> 443.
+
+-ifdef(TEST).
+scheme() -> oneof([<<"http">>, <<"https">>]).
+
+scheme_host_port() ->
+	?LET({Scheme, Host, Port},
+		{scheme(), host(), int(1, 65535)},
+		begin
+			HostBin = list_to_binary(Host),
+			{[{Scheme, ?LOWER(HostBin), Port}],
+				case default_port(Scheme) of
+					Port -> << Scheme/binary, "://", HostBin/binary>>;
+					_ -> << Scheme/binary, "://", HostBin/binary, $:, (integer_to_binary(Port))/binary >>
+				end}
+		end).
+
+prop_parse_origin() ->
+	?FORALL({Res, Origin}, scheme_host_port(), Res =:= parse_origin(Origin)).
+
+parse_origin_test_() ->
+	Tests = [
+		{<<"http://www.example.org:8080">>, [{<<"http">>, <<"www.example.org">>, 8080}]},
+		{<<"http://www.example.org">>, [{<<"http">>, <<"www.example.org">>, 80}]},
+		{<<"http://192.0.2.1:8080">>, [{<<"http">>, <<"192.0.2.1">>, 8080}]},
+		{<<"http://192.0.2.1">>, [{<<"http">>, <<"192.0.2.1">>, 80}]},
+		{<<"http://[2001:db8::1]:8080">>, [{<<"http">>, <<"[2001:db8::1]">>, 8080}]},
+		{<<"http://[2001:db8::1]">>, [{<<"http">>, <<"[2001:db8::1]">>, 80}]},
+		{<<"http://[::ffff:192.0.2.1]:8080">>, [{<<"http">>, <<"[::ffff:192.0.2.1]">>, 8080}]},
+		{<<"http://[::ffff:192.0.2.1]">>, [{<<"http">>, <<"[::ffff:192.0.2.1]">>, 80}]},
+		{<<"http://example.org https://blue.example.com:8080">>,
+			[{<<"http">>, <<"example.org">>, 80},
+			 {<<"https">>, <<"blue.example.com">>, 8080}]}
+	],
+	[{V, fun() -> R = parse_origin(V) end} || {V, R} <- Tests].
+
+parse_origin_reference_test_() ->
+	Tests = [
+		<<"null">>,
+		<<"httpx://example.org:80">>,
+		<<"httpx://example.org:80 null">>,
+		<<"null null">>
+	],
+	[{V, fun() -> [true = is_reference(Ref) || Ref <- parse_origin(V)] end} || V <- Tests].
+
+parse_origin_error_test_() ->
+	Tests = [
+		<<>>,
+		<<"null", $\t, "null">>,
+		<<"null", $\s, $\s, "null">>
+	],
+	[{V, fun() -> {'EXIT', _} = (catch parse_origin(V)) end} || V <- Tests].
+
+horse_parse_origin_blue_example_org() ->
+	horse:repeat(200000,
+		parse_origin(<<"http://blue.example.org:8080">>)
+	).
+
+horse_parse_origin_ipv4() ->
+	horse:repeat(200000,
+		parse_origin(<<"http://192.0.2.1:8080">>)
+	).
+
+horse_parse_origin_ipv6() ->
+	horse:repeat(200000,
+		parse_origin(<<"http://[2001:db8::1]:8080">>)
+	).
+
+horse_parse_origin_ipv6_v4() ->
+	horse:repeat(200000,
+		parse_origin(<<"http://[::ffff:192.0.2.1]:8080">>)
+	).
+
+horse_parse_origin_null() ->
+	horse:repeat(200000,
+		parse_origin(<<"null">>)
+	).
 -endif.
 
 %% @doc Parse the Pragma header.
@@ -2255,9 +2444,7 @@ parse_range_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_range(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_range_first_last() ->
 	horse:repeat(200000,
 		parse_range(<<"bytes=500-999">>)
@@ -2307,9 +2494,7 @@ parse_retry_after_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_retry_after(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_retry_after_date() ->
 	horse:repeat(200000,
 		parse_retry_after(<<"Fri, 31 Dec 1999 23:59:59 GMT">>)
@@ -2417,9 +2602,7 @@ parse_sec_websocket_extensions_error_test_() ->
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_sec_websocket_extensions(V)) end}
 		|| V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_sec_websocket_extensions() ->
 	horse:repeat(200000,
 		parse_sec_websocket_extensions(<<"mux; max-channels=4; flow-control, deflate-stream">>)
@@ -2456,9 +2639,7 @@ parse_sec_websocket_protocol_req_error_test_() ->
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_sec_websocket_protocol_req(V)) end}
 		|| V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_sec_websocket_protocol_req() ->
 	horse:repeat(200000,
 		parse_sec_websocket_protocol_req(<<"chat, superchat">>)
@@ -2494,9 +2675,7 @@ parse_sec_websocket_protocol_resp_error_test_() ->
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_sec_websocket_protocol_resp(V)) end}
 		|| V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_sec_websocket_protocol_resp() ->
 	horse:repeat(200000,
 		parse_sec_websocket_protocol_resp(<<"chat">>)
@@ -2533,9 +2712,7 @@ parse_sec_websocket_version_req_error_test_() ->
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_sec_websocket_version_req(V)) end}
 		|| V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_sec_websocket_version_req_13() ->
 	horse:repeat(200000,
 		parse_sec_websocket_version_req(<<"13">>)
@@ -2591,9 +2768,7 @@ parse_sec_websocket_version_resp_error_test_() ->
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_sec_websocket_version_resp(V)) end}
 		|| V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_sec_websocket_version_resp() ->
 	horse:repeat(200000,
 		parse_sec_websocket_version_resp(<<"13, 8, 7">>)
@@ -2691,9 +2866,7 @@ parse_te_test_() ->
 		{<<"trailers, deflate;q=0.5">>, {trailers, [{<<"deflate">>, 500}]}}
 	],
 	[{V, fun() -> R = parse_te(V) end} || {V, R} <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_te() ->
 	horse:repeat(200000,
 		parse_te(<<"trailers, deflate;q=0.5">>)
@@ -2718,9 +2891,7 @@ parse_trailer_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_trailer(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_trailer() ->
 	horse:repeat(200000,
 		parse_trailer(<<"Date, Content-MD5">>)
@@ -2769,9 +2940,7 @@ parse_transfer_encoding_error_test_() ->
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_transfer_encoding(V)) end}
 		|| V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_transfer_encoding_chunked() ->
 	horse:repeat(200000,
 		parse_transfer_encoding(<<"chunked">>)
@@ -3018,9 +3187,7 @@ parse_www_authenticate_error_test_() ->
 		<<>>
 	],
 	[{V, fun() -> {'EXIT', _} = (catch parse_www_authenticate(V)) end} || V <- Tests].
--endif.
 
--ifdef(PERF).
 horse_parse_www_authenticate() ->
 	horse:repeat(200000,
 		parse_www_authenticate(<<"Newauth realm=\"apps\", type=1, title=\"Login to \\\"apps\\\"\", Basic realm=\"simple\"">>)
@@ -3053,6 +3220,149 @@ parse_x_forwarded_for_error_test_() ->
 	[{V, fun() -> {'EXIT', _} = (catch parse_x_forwarded_for(V)) end} || V <- Tests].
 -endif.
 
+%% Building.
+
+%% @doc Build the Access-Control-Allow-Credentials header.
+
+-spec access_control_allow_credentials() -> iodata().
+access_control_allow_credentials() -> <<"true">>.
+
+%% @doc Build the Access-Control-Allow-Headers header.
+
+-spec access_control_allow_headers([binary()]) -> iodata().
+access_control_allow_headers(Headers) ->
+	join_token_list(nonempty(Headers)).
+
+-ifdef(TEST).
+access_control_allow_headers_test_() ->
+	Tests = [
+		{[<<"accept">>], <<"accept">>},
+		{[<<"accept">>, <<"authorization">>, <<"content-type">>], <<"accept, authorization, content-type">>}
+	],
+	[{lists:flatten(io_lib:format("~p", [V])),
+		fun() -> R = iolist_to_binary(access_control_allow_headers(V)) end} || {V, R} <- Tests].
+
+access_control_allow_headers_error_test_() ->
+	Tests = [
+		[]
+	],
+	[{lists:flatten(io_lib:format("~p", [V])),
+		fun() -> {'EXIT', _} = (catch access_control_allow_headers(V)) end} || V <- Tests].
+
+horse_access_control_allow_headers() ->
+	horse:repeat(200000,
+		access_control_allow_headers([<<"accept">>, <<"authorization">>, <<"content-type">>])
+	).
+-endif.
+
+%% @doc Build the Access-Control-Allow-Methods header.
+
+-spec access_control_allow_methods([binary()]) -> iodata().
+access_control_allow_methods(Methods) ->
+	join_token_list(nonempty(Methods)).
+
+-ifdef(TEST).
+access_control_allow_methods_test_() ->
+	Tests = [
+		{[<<"GET">>], <<"GET">>},
+		{[<<"GET">>, <<"POST">>, <<"DELETE">>], <<"GET, POST, DELETE">>}
+	],
+	[{lists:flatten(io_lib:format("~p", [V])),
+		fun() -> R = iolist_to_binary(access_control_allow_methods(V)) end} || {V, R} <- Tests].
+
+access_control_allow_methods_error_test_() ->
+	Tests = [
+		[]
+	],
+	[{lists:flatten(io_lib:format("~p", [V])),
+		fun() -> {'EXIT', _} = (catch access_control_allow_methods(V)) end} || V <- Tests].
+
+horse_access_control_allow_methods() ->
+	horse:repeat(200000,
+		access_control_allow_methods([<<"GET">>, <<"POST">>, <<"DELETE">>])
+	).
+-endif.
+
+%% @doc Build the Access-Control-Allow-Origin header.
+
+-spec access_control_allow_origin({binary(), binary(), 0..65535} | reference() | '*') -> iodata().
+access_control_allow_origin({Scheme, Host, Port}) ->
+	case default_port(Scheme) of
+		Port -> [Scheme, <<"://">>, Host];
+		_ -> [Scheme, <<"://">>, Host, <<":">>, integer_to_binary(Port)]
+	end;
+access_control_allow_origin('*') -> <<$*>>;
+access_control_allow_origin(Ref) when is_reference(Ref) -> <<"null">>.
+
+-ifdef(TEST).
+access_control_allow_origin_test_() ->
+	Tests = [
+		{{<<"http">>, <<"www.example.org">>, 8080}, <<"http://www.example.org:8080">>},
+		{{<<"http">>, <<"www.example.org">>, 80}, <<"http://www.example.org">>},
+		{{<<"http">>, <<"192.0.2.1">>, 8080}, <<"http://192.0.2.1:8080">>},
+		{{<<"http">>, <<"192.0.2.1">>, 80}, <<"http://192.0.2.1">>},
+		{{<<"http">>, <<"[2001:db8::1]">>, 8080}, <<"http://[2001:db8::1]:8080">>},
+		{{<<"http">>, <<"[2001:db8::1]">>, 80}, <<"http://[2001:db8::1]">>},
+		{{<<"http">>, <<"[::ffff:192.0.2.1]">>, 8080}, <<"http://[::ffff:192.0.2.1]:8080">>},
+		{{<<"http">>, <<"[::ffff:192.0.2.1]">>, 80}, <<"http://[::ffff:192.0.2.1]">>},
+		{make_ref(), <<"null">>},
+		{'*', <<$*>>}
+	],
+	[{lists:flatten(io_lib:format("~p", [V])),
+		fun() -> R = iolist_to_binary(access_control_allow_origin(V)) end} || {V, R} <- Tests].
+
+horse_access_control_allow_origin() ->
+	horse:repeat(200000,
+		access_control_allow_origin({<<"http">>, <<"example.org">>, 8080})
+	).
+-endif.
+
+%% @doc Build the Access-Control-Expose-Headers header.
+
+-spec access_control_expose_headers([binary()]) -> iodata().
+access_control_expose_headers(Headers) ->
+	join_token_list(nonempty(Headers)).
+
+-ifdef(TEST).
+access_control_expose_headers_test_() ->
+	Tests = [
+		{[<<"accept">>], <<"accept">>},
+		{[<<"accept">>, <<"authorization">>, <<"content-type">>], <<"accept, authorization, content-type">>}
+	],
+	[{lists:flatten(io_lib:format("~p", [V])),
+		fun() -> R = iolist_to_binary(access_control_expose_headers(V)) end} || {V, R} <- Tests].
+
+access_control_expose_headers_error_test_() ->
+	Tests = [
+		[]
+	],
+	[{lists:flatten(io_lib:format("~p", [V])),
+		fun() -> {'EXIT', _} = (catch access_control_expose_headers(V)) end} || V <- Tests].
+
+horse_access_control_expose_headers() ->
+	horse:repeat(200000,
+		access_control_expose_headers([<<"accept">>, <<"authorization">>, <<"content-type">>])
+	).
+-endif.
+
+%% @doc Build the Access-Control-Max-Age header.
+
+-spec access_control_max_age(non_neg_integer()) -> iodata().
+access_control_max_age(MaxAge) -> integer_to_binary(MaxAge).
+
+-ifdef(TEST).
+access_control_max_age_test_() ->
+	Tests = [
+		{0, <<"0">>},
+		{42, <<"42">>},
+		{69, <<"69">>},
+		{1337, <<"1337">>},
+		{3495, <<"3495">>},
+		{1234567890, <<"1234567890">>}
+	],
+	[{V, fun() -> R = access_control_max_age(V) end} || {V, R} <- Tests].
+-endif.
+
 %% Internal.
 
 %% Only return if the list is not empty.
@@ -3081,3 +3391,9 @@ token_ci(R, Acc, T) -> token_ci_list_sep(R, [T|Acc]).
 token_ci_list_sep(<<>>, Acc) -> lists:reverse(Acc);
 token_ci_list_sep(<< C, R/bits >>, Acc) when ?IS_WS(C) -> token_ci_list_sep(R, Acc);
 token_ci_list_sep(<< $,, R/bits >>, Acc) -> token_ci_list(R, Acc).
+
+join_token_list([]) -> [];
+join_token_list([H|T]) -> join_token_list(T, [H]).
+
+join_token_list([], Acc) -> lists:reverse(Acc);
+join_token_list([H|T], Acc) -> join_token_list(T, [H,<<", ">>|Acc]).

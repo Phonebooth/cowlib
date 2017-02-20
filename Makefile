@@ -1,7 +1,26 @@
 # See LICENSE for licensing information.
 
 PROJECT = cowlib
-PLT_APPS = crypto
+PROJECT_DESCRIPTION = Support library for manipulating Web protocols.
+PROJECT_VERSION = 2.0.0-pre.1
+
+#ERLC_OPTS += +bin_opt_info
+ifdef HIPE
+	ERLC_OPTS += -smp +native
+	TEST_ERLC_OPTS += -smp +native
+endif
+
+LOCAL_DEPS = crypto
+DIALYZER_OPTS = -Werror_handling -Wunmatched_returns
+
+CI_OTP ?= OTP-18.0.3 OTP-18.1.5 OTP-18.2.4.1 OTP-18.3.4.4 OTP-19.0.7 OTP-19.1.6 OTP-19.2
+CI_HIPE ?= $(lastword $(CI_OTP))
+CI_ERLLVM ?= $(CI_HIPE)
+
+TEST_ERLC_OPTS += +'{parse_transform, eunit_autoexport}' +'{parse_transform, horse_autoexport}'
+TEST_DEPS = horse triq
+dep_horse = git https://github.com/extend/horse master
+dep_triq = git https://github.com/krestenkrab/triq master
 
 include erlang.mk
 
@@ -32,12 +51,12 @@ gen:
 
 # Performance testing.
 
-deps/horse:
-	git clone -n -- https://github.com/extend/horse $(DEPS_DIR)/horse
-	cd $(DEPS_DIR)/horse ; git checkout -q master
-	$(MAKE) -C $(DEPS_DIR)/horse
+ifeq ($(MAKECMDGOALS),perfs)
+.NOTPARALLEL:
+endif
 
-perfs: ERLC_OPTS += -DPERF=1 +'{parse_transform, horse_autoexport}' -DEXTRA=1
-perfs: clean deps deps/horse app
+ci-extra:: perfs
+
+perfs: test-build
 	$(gen_verbose) erl -noshell -pa ebin deps/horse/ebin \
-		-eval 'horse:app_perf($(PROJECT)), init:stop().'
+		-eval 'horse:app_perf($(PROJECT)), erlang:halt().'
